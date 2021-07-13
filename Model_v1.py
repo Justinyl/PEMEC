@@ -113,7 +113,7 @@ def build_memcap(sl = 20):
         if (n == m.n.first()):
             return Constraint.Skip 
         return (- (m.ua[n]*m.Ca['H2O', n] - m.ua[n-1]*m.Ca['H2O', n-1])/m.dz - \
-            1/m.b*(m.Nd[n] + m.Neo[n] + m.Nrxn['H2O', n]) == 0 )
+            1/m.h_ch*(m.Nd[n] + m.Neo[n] + m.Nrxn['H2O', n]) == 0 )
     m.Eq1 = Constraint(m.n, rule=_Eq1, doc= 'MB H2O anode')
 
     def _Eq2(m, n):
@@ -123,7 +123,7 @@ def build_memcap(sl = 20):
         if (n == m.n.first()):
             return Constraint.Skip 
         return - (m.uc[n]*m.Cc['H2O', n] - m.uc[n-1]*m.Cc['H2O', n-1])/m.dz +  \
-            1/m.b*(m.Nd[n] + m.Neo[n]) == 0
+            1/m.h_ch*(m.Nd[n] + m.Neo[n]) == 0
     m.Eq2 = Constraint(m.n, rule=_Eq2, doc= 'MB H2O cathode')
 
     def _Eq3(m, n):
@@ -133,7 +133,7 @@ def build_memcap(sl = 20):
         if (n == m.n.first()):
             return Constraint.Skip    
         return - (m.ua[n]*m.Ca['O2', n] - m.ua[n-1]*m.Ca['O2', n-1])/m.dz + \
-            1/m.b*(m.Nrxn['O2', n]) == 0   
+            1/m.h_ch*(m.Nrxn['O2', n]) == 0   
     m.Eq3 = Constraint(m.n, rule=_Eq3, doc= 'MB O2 anode')
 
     def _Eq4(m, n):
@@ -143,7 +143,7 @@ def build_memcap(sl = 20):
         if (n == m.n.first()):
             return Constraint.Skip 
         return (- (m.ua[n]*m.Ca['H2', n] - m.ua[n-1]*m.Ca['H2', n-1])/m.dz + \
-            1/m.b*(m.gamma*m.Nper[n]) == 0 )
+            1/m.h_ch*(m.gamma*m.Nper[n]) == 0 )
     m.Eq4 = Constraint(m.n, rule=_Eq4, doc= 'MB H2 anode')
 
     def _Eq5(m, n):
@@ -153,7 +153,7 @@ def build_memcap(sl = 20):
         if (n == m.n.first()):
             return Constraint.Skip 
         return - (m.uc[n]*m.Cc['H2', n] - m.uc[n-1]*m.Cc['H2', n-1])/m.dz + \
-            1/m.b*(m.Nrxn['H2', n] - m.gamma*m.Nper[n]) == 0 
+            1/m.h_ch*(m.Nrxn['H2', n] - m.gamma*m.Nper[n]) == 0 
     m.Eq5 = Constraint(m.n, rule = _Eq5, doc = 'MB H2 cathode')
 
     def _Eq6(m, n):
@@ -267,10 +267,10 @@ init_model(m)
 opt = SolverFactory('gams')
 io_options = dict() 
 
-io_options['solver'] = "ipopt"
-res = opt.solve(m,
-    tee=True,
-    io_options=io_options)
+# io_options['solver'] = "ipopth"
+# res = opt.solve(m,
+#     tee=True,
+#     io_options=io_options)
 
 io_options['solver'] = "baron"
 res = opt.solve(m,
@@ -355,7 +355,7 @@ for v in range(0,21):
     l1.append(value(m.ne[v]))
 df6['ne'] = l1
 
-col7 = ['ne']
+col7 = ['j']
 df7 = pd.DataFrame(columns = col7)
 l1 = []
 for v in range(0,21):
