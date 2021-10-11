@@ -16,11 +16,6 @@ def build_memcap(sl = 20):
         return 2
     def j_init(m, n):
         return 1
-    def ua_init(m, n):
-        return value(m.ua_0) + n*(4.8657/60-m.ua_0)/sl
-    def uc_init(m, n):
-        # return (value(m.uc_0) + n*(m.uc_l-m.uc_0)/sl)
-        return (value(m.uc_0) + n*(1.2096e-4-m.uc_0)/sl)
     def Pa_init(m, n):
         return value(m.Pa0)
     def Pc_init(m, n):
@@ -58,9 +53,6 @@ def build_memcap(sl = 20):
 
     # Introduced in 1.6
 
-    m.Tm = Var(m.n, initialize = 328, doc = 'Temperature of the membrane') 
-    m.Ta = Var(m.n, initialize = 348, doc = 'Temperature of anode') 
-    m.Tc = Var(m.n, initialize = 338, doc = 'Temperature of cathode') 
     m.Ca_tot = Var(m.n, doc = 'Total concentration in anode')
     m.Cc_tot = Var(m.n, doc = 'Total concentration in cathode')
     m.cp_a = Var(m.n, doc = 'molar heat capacity in anode')
@@ -76,9 +68,6 @@ def build_memcap(sl = 20):
     m.Pa0 = Param(initialize=2, doc='inlet 2 (bar)') # Which pressure to use
     m.Pc0 = Param(initialize=100, doc='inlet 2 (bar)') # Which pressure to use
     m.b = Param(initialize=0.105, doc= '0.105 (m)')
-    m.ua_0 = Param(initialize = 2.66/60, doc = 'velocity(m/s)')  
-    m.uc_0 = Param(initialize = 0.144/60, doc = 'velocity(m/s)') 
-    m.uc_l = Param(initialize = 0.02364/60, doc = 'velocity(m/s)') 
     m.h_ch = Param(initialize = 0.003, doc = 'height of the channel (m)') 
     
     m.h_m = Param(initialize = 0.0002, doc = 'membrane thickness (m)')  
@@ -89,8 +78,6 @@ def build_memcap(sl = 20):
     m.j = Param(m.n, initialize = j_init, doc = 'j_init')
     # m.V = Param(m.n, initialize = V_init, doc = 'v_init')
     m.j_avg = Param(initialize = 1, doc = 'Average current density')
-    m.ua = Param(m.n, initialize = ua_init, doc = 'Anode velocity initialization' )
-    m.uc = Param(m.n, initialize = uc_init, doc = 'Cathode velocity initialization')
     
     m.Pa = Param(m.n, initialize = Pa_init, doc = 'Anode Pressure (bar) initialization')
     m.Pc = Param(m.n, initialize = Pc_init, doc = 'Cathode Pressure (bar) initialization')
@@ -102,10 +89,10 @@ def build_memcap(sl = 20):
 
     # Other parameters
     m.dGstd = Param(initialize = 237.14e3, doc = 'standrad Gibbs free energy(J/mol)')
-    m.R = Param(initialize = 0.035e-3, doc = 'Electrode resistance(ohm * m)') # note
+    # m.R = Param(initialize = 0.035e-3, doc = 'Electrode resistance(ohm * m)') # note
     m.rho = Param(initialize = 0.30, doc = 'Resistance(ohm*m)') # use this instead
  
-    m.R = Param(initialize = 8.3145, doc = 'gas cosntant(J/(mool*K))')
+    m.R = Param(initialize = 8.3145, doc = 'gas cosntant(J/(mol*K))')
     m.alpha_a = Param(initialize = 2, doc = 'transfer coefficient(anode)') 
     m.alpha_c = Param(initialize = 0.5, doc = 'transfer coefficient(cathode)') 
     m.j0_a = Param(initialize = 10e-10, doc = 'exchange current density at anode(A/cm^2)')
@@ -124,13 +111,53 @@ def build_memcap(sl = 20):
     m.cp_bp = Param(initialize = 450, doc = 'specific heat of bipolar(J/(kg*K))')
     m.rhom = Param(initialize = 3860, doc='density of MEA(kg/m3)')
     m.rhobp = Param(initialize = 8100, doc = 'density of bipolar plate(kg/m3)')
+    m.rhos = Param(m.i, mutable = True, doc = 'density of species')
+    m.mw = Param(m.i, mutable = True, doc = 'molecular weight')
     m.Ta_in = Param(initialize = 55 + 273.15, doc = 'Inlet temperature of anode(K)')
 
     # Auxilary contants
     m.dz = Param(initialize = m.L/(len(m.n)-1), doc='Discretization step size')  
-
     m.Ca0 = Param(m.i, initialize = {'H2O':55.5e3, 'O2':0, 'H2':0 }, doc='Initialial conditions')
+    m.zH = Param(initialize = 1.05, doc = 'Compressibility')
+    m.p2SI = Param(initialize = 1e5, doc = 'converting pressure from bar to Pa') 
 
+   # Initializing parameters
+
+    m.rhos['H2O'] = 1e3 #kg/m^3
+    m.mw['H2O'] = 18e3 #kg/mol
+
+    # More Varibles 
+    m.ua_0 = Param(initialize = 2.66/60, doc = 'velocity(m/s)')  
+    m.uc_0 = Param(initialize = 0.144/60, doc = 'velocity(m/s)') 
+    m.uc_l = Param(initialize = 0.02364/60, doc = 'velocity(m/s)') 
+    # m.uc_0 = Var(domain = NonNegativeReals, initialize = 0.144/60, doc = 'velocity(m/s)') 
+    # m.uc_l = Var(domain = NonNegativeReals, initialize = 0.02364/60, doc = 'velocity(m/s)') 
+    m.EH = Var(m.n, domain = NonNegativeReals, doc = 'voltage(V) contributing to heat of formation change')
+
+    def ua_init(m, n):
+        return value(m.ua_0) + n*(4.8657/60-m.ua_0)/sl
+    def uc_init(m, n):
+        # return (value(m.uc_0) + n*(m.uc_l-m.uc_0)/sl)
+        return (value(m.uc_0) + n*(1.2096e-4-m.uc_0)/sl)
+
+    def Ta_init(m,n):
+        return 328
+    def Tm_init(m,n):
+        return 348
+    def Tc_init(m,n):
+        return 338
+
+    # m.Ta = Var(m.n, initialize = Ta_init, doc = 'Temperature of the membrane') 
+    # m.Tm = Var(m.n, initialize = Tm_init, doc = 'Temperature of anode') 
+    # m.Tc = Var(m.n, initialize = Tc_init, doc = 'Temperature of cathode') 
+    m.Ta = Param(m.n, initialize = Ta_init, doc = 'Temperature of anode') 
+    m.Tm = Param(m.n, initialize = Tm_init, doc = 'Temperature of anode') 
+    m.Tc = Param(m.n, initialize = Tc_init, doc = 'Temperature of cathode') 
+
+    # m.ua = Param(m.n, initialize = ua_init, doc = 'Anode velocity' )
+    # m.uc = Param(m.n, initialize = uc_init, doc = 'Cathode velocity')
+    m.ua = Var(m.n, domain = NonNegativeReals, initialize = ua_init, doc = 'Anode velocity' )
+    m.uc = Var(m.n, domain = NonNegativeReals, initialize = uc_init, doc = 'Cathode velocity')
 
     # ================== Equations ===================
 
@@ -339,6 +366,12 @@ def build_memcap(sl = 20):
         return m.cp_c[n] == (m.Cc['H2O',n]*m.cp['H2O'] + m.Cc['H2',n]*m.cp['H2'])/(m.Cc_tot[n]+eps)
     m.Eq22 = Constraint(m.n, rule = _Eq22, doc = 'Molar heat capacity(Cathode)')
 
+    def _Eq_EH(m,n):
+        """
+        Voltage change for heat of formation
+        """
+        return 
+
     def _Eq23(m,n):
         """
         EB: Anode
@@ -348,7 +381,7 @@ def build_memcap(sl = 20):
         return m.ua[n]*(m.Ta[n]-m.Ta[n-1])/m.dz == m.fbp/(m.Ca_tot[n]*m.cp_a[n]*m.h_ch+eps)*(m.Tc[n]-m.Ta[n])+\
             (m.cp['H2']*m.gamma*m.Nper[n] + m.cp['O2']*m.Nrxn['O2',n]+m.fa)*(m.Tm[n]-m.Ta[n])/(m.Ca_tot[n]*\
             m.cp_a[n]*m.h_ch+eps)
-    m.Eq23 = Constraint(m.n, rule = _Eq23, doc = 'Energy Balance(Anode)')
+    #m.Eq23 = Constraint(m.n, rule = _Eq23, doc = 'Energy Balance(Anode)')
 
     def _Eq24(m,n):
         """
@@ -361,7 +394,7 @@ def build_memcap(sl = 20):
         return m.uc[n]*(m.Tc[n]-m.Tc[n+1])/m.dz == m.fbp/(m.Cc_tot[n]*m.cp_c[n]*m.h_ch+eps)*(m.Ta[n]-m.Tc[n])+\
             (m.cp['H2O']*(m.Nd[n] + m.Neo[n]) + m.cp['H2']*(m.Nrxn['H2',n]+(1-m.gamma)*m.Nper[n]) +m.fc)*(m.Tm[n]-m.Tc[n])/(m.Cc_tot[n]*\
             m.cp_c[n]*m.h_ch+eps)
-    m.Eq24 = Constraint(m.n, rule = _Eq24, doc = 'Energy Balance(Cathode)')
+    #m.Eq24 = Constraint(m.n, rule = _Eq24, doc = 'Energy Balance(Cathode)')
 
     def _Eq25(m,n):
         """
@@ -370,7 +403,52 @@ def build_memcap(sl = 20):
         return (m.V[n]-m.E[n])*m.j[n]/(m.h_m*m.rhom*m.cp_m + m.hbp*m.rhobp*m.cp_bp) + (m.cp['H2O']*(m.Nd[n]+\
             m.Neo[n]+m.Nrxn['H2O',n])+m.fa)*(m.Ta[n]-m.Tm[n])/(m.h_m*m.rhom*m.cp_m + m.hbp*m.rhobp*m.cp_bp) +\
             (m.cp['H2']*m.Nper[n]+m.fc)*(m.Tc[n]-m.Tm[n])/(m.h_m*m.rhom*m.cp_m + m.hbp*m.rhobp*m.cp_bp) == 0
-    m.Eq25 = Constraint(m.n, rule = _Eq25, doc = 'Energy Balance(MEA-bipolar)')
+    #m.Eq25 = Constraint(m.n, rule = _Eq25, doc = 'Energy Balance(MEA-bipolar)')
+
+    # def _Eq26(m,n):
+    #     """
+    #     Velocity of anode side
+    #     """
+    #     if (m.n.first() == n):
+    #         return m.ua[n] == m.ua_0
+    #     return (m.ua[n] - m.ua[n-1])*(m.R*m.Ta[n]/(m.Pa[n]*m.p2SI)*m.Ca_tot[n] + m.mw['H2O']/m.rhos['H2O']\
+    #         *m.Ca['H2O',n]) == 0
+    # m.Eq26 = Constraint(m.n, rule = _Eq26, doc = 'Velocity(Anode)')
+
+    # def _Eq27(m,n):
+    #     """
+    #     Velocity of cathode side
+    #     """
+    #     if (m.n.last() == n):
+    #         return m.uc[n] == m.uc_l 
+    #     return (m.uc[n] - m.uc[n+1])*(m.R*m.Tc[n]/(m.Pa[n]*m.p2SI*m.zH)*m.Cc_tot[n] + m.mw['H2O']/m.rhos['H2O']\
+    #         *m.Ca['H2O',n]) == 0
+    # m.Eq27 = Constraint(m.n, rule = _Eq27, doc = 'Velocity(Cathode)')
+
+    def _Eq26(m,n):
+        """
+        Velocity of anode side
+        """
+        if (m.n.first() == n):
+            return m.ua[n] == m.ua_0
+        return m.ua[n]*(m.R/(m.Pa[n]*m.p2SI)* ((m.Ta[n]*m.Ca['O2',n] - m.Ta[n-1]*m.Ca['O2',n-1])/m.dz + \
+            (m.Ta[n]*m.Ca['H2',n] - m.Ta[n-1]*m.Ca['H2',n-1])/m.dz) + m.mw['H2O']/m.rhos['H2O']*(m.Ta[n]\
+            *m.Ca['H2O',n] - m.Ta[n-1]*m.Ca['H2O',n-1])/m.dz ) \
+            == -(m.ua[n] - m.ua[n-1])*\
+            (m.R*m.Ta[n]/(m.Pa[n]*m.p2SI)*m.Ca_tot[n] + m.mw['H2O']/m.rhos['H2O']*m.Ca['H2O',n])
+    m.Eq26 = Constraint(m.n, rule = _Eq26, doc = 'Velocity(Anode)')
+
+    def _Eq27(m,n):
+        """
+        Velocity of cathode side
+        """
+        if (m.n.last() == n):
+            return m.uc[n] == m.uc_l 
+        return m.uc[n]*(m.R/(m.Pc[n]*m.p2SI*m.zH)* ((m.Tc[n]*m.Cc['H2',n] - m.Tc[n+1]*m.Cc['H2',n+1])/m.dz) +\
+            m.mw['H2O']/m.rhos['H2O']*((m.Tc[n]*m.Cc['H2O',n] - m.Tc[n+1]*m.Cc['H2O',n+1])/m.dz)) \
+            == -(m.uc[n] - m.uc[n+1])*(m.R*m.Tc[n]/(m.Pa[n]*m.p2SI*m.zH)*m.Cc_tot[n] + m.mw['H2O']/m.rhos['H2O']\
+            *m.Ca['H2O',n])
+    m.Eq27 = Constraint(m.n, rule = _Eq27, doc = 'Velocity(Cathode)')
 
     m.obj = Objective(expr = 5)
 
@@ -381,7 +459,6 @@ def init_model(m):
     m.Cc['H2', m.n.last()] = 2.141e3
     return 
 
-
 m = build_memcap()
 
 init_model(m)
@@ -389,12 +466,12 @@ init_model(m)
 opt = SolverFactory('gams')
 io_options = dict() 
 
-# io_options['solver'] = "ipopth"
+io_options['solver'] = "ipopt"
 # res = opt.solve(m,
 #     tee=True,
 #     io_options=io_options)
 
-io_options['solver'] = "baron"
+# io_options['solver'] = "baron"
 res = opt.solve(m,
     tee=True,
     keepfiles=True,
