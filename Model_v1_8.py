@@ -15,11 +15,15 @@ def build_memcap(sl = 20):
     def V_init(m, n):
         return 2
     def j_init(m, n):
-        return 1
+        return 0.98 + (0.98 - 1.04)/sl*n
     def Pa_init(m, n):
         return value(m.Pa0)
     def Pc_init(m):
         return value(m.Pc0)
+    def Psat_wt_init(m,n):
+        return 0.16     # saturation pressure using Antoine's Eq at 328 K
+    def Pa_wt_init(m,n):
+        return 0.16     # saturation pressure using Antoine's Eq at 328 K
 
     m.i = Set(initialize=['H2O', 'O2' ,'H2'], doc='set of species')
     m.ci = Set(within = m.i, initialize = ['H2O', 'H2'], doc='subset of species in cathode')
@@ -53,12 +57,22 @@ def build_memcap(sl = 20):
     m.C_O2_wc = Var(m.n, domain = NonNegativeReals, doc = 'O2 anode concentration @ working condition')
     m.C_H2_wc = Var(m.n, domain = NonNegativeReals, doc = 'H2 anode concentration @ working condition')
 
+
     # Introduced in 1.6
 
-    m.Ca_tot = Var(m.n, doc = 'Total concentration in anode')
+    def Ca_tot_init(m,n):
+        return 55.5e3
+
+    m.Ca_tot = Var(m.n, initialize = Ca_tot_init, doc = 'Total concentration in anode')
+    # m.Ca_tot = Var(m.n, doc = 'Total concentration in anode')
     m.Cc_tot = Var(m.n, doc = 'Total concentration in cathode')
     m.cp_a = Var(m.n, doc = 'molar heat capacity in anode')
     m.cp_c = Var(m.n, doc = 'molar heat capacity in cathode')
+
+    # Introduced in 1.8:
+
+    m.Psat_wt = Var(m.n, initialize = Psat_wt_init, doc = 'Saturation Pressure of Water')
+    m.Pa_wt = Var(m.n, initialize = Pa_wt_init, doc = 'Pressure of water in Anode')
 
     # ========= Auxilary variables =================
 
@@ -138,6 +152,7 @@ def build_memcap(sl = 20):
 
     def ua_init(m, n):
         return value(m.ua_0) + n*(4.8657/60-m.ua_0)/sl
+        # return value(m.ua_0) + n*(3.9/60-m.ua_0)/sl
     def uc_init(m, n):
         # return (value(m.uc_0)) 
         # return (value(m.uc_0) + n*(m.uc_l/3 - m.uc_0)/sl)
@@ -157,10 +172,10 @@ def build_memcap(sl = 20):
     # m.Tm = Param(m.n, initialize = Tm_init, doc = 'Temperature of anode') 
     # m.Tc = Param(m.n, initialize = Tc_init, doc = 'Temperature of cathode') 
 
-    m.ua = Param(m.n, initialize = ua_init, doc = 'Anode velocity' )
-    m.uc = Param(m.n, initialize = uc_init, doc = 'Cathode velocity')
-    # m.ua = Var(m.n, domain = NonNegativeReals, initialize = ua_init, doc = 'Anode velocity' )
-    # m.uc = Var(m.n, domain = NonNegativeReals, initialize = uc_init, doc = 'Cathode velocity')
+    m.ua_ref = Param(m.n, initialize = ua_init, doc = 'Anode velocity' )
+    m.uc_ref = Param(m.n, initialize = uc_init, doc = 'Cathode velocity')
+    m.ua = Var(m.n, domain = NonNegativeReals, initialize = ua_init, doc = 'Anode velocity' )
+    m.uc = Var(m.n, domain = NonNegativeReals, initialize = uc_init, doc = 'Cathode velocity')
 
 
     m.j_avg = Param(initialize = 1, doc = 'Average current density')
@@ -295,7 +310,7 @@ def build_memcap(sl = 20):
         """
         Cell voltage
         """
-        return m.V == m.E[n] + m.ohm[n] + m.act[n]
+        return m.V == m.E[n] + m.ohm[n] + m.act[n] + m.dif[n]
     m.Eq12 = Constraint(m.n, rule = _Eq12, doc = 'Eq Cell volage balance')
 
     def _Eq13(m,n):
@@ -313,14 +328,21 @@ def build_memcap(sl = 20):
         return m.kappa[n] == (1-m.gamma)*m.Nper[n]/(m.Nrxn['H2',n]+((1-m.gamma)*m.Nper[n])+eps)
     m.Eq14 = Constraint(m.n, rule = _Eq14, doc = 'Eq fraction of back permeation')
 
+    def _Eqwt_Antoine(m,n):
+        # return m.Psat_wt[n] == 10**(4.5643-1435.264/(m.Ta[n]-64.848)) 
+        return m.Psat_wt[n] == 0.16
+    m.Eqwt_Antoine = Constraint(m.n, rule = _Eqwt_Antoine, doc = 'Saturation Pressure of Water in Anode')
+
+    def _Eqwt_Pa(m,n):
+        return m.Pa_wt[n] ==  m.Ca['H2O',n]/m.Ca_tot[n] * m.Psat_wt[n]
+    m.Eqwt_Pa = Constraint(m.n, rule = _Eqwt_Pa, doc = 'Partial Pressure of Water in Anode')
+
     def _Eq15(m,n):
         """
         Gibbs free energy
         """
-        # return  m.dG[n] == m.dGstd + m.R*m.Tm*\
-        #     log((m.Pc*m.Cc['H2',n]/(m.Cc['H2',n]+eps))*\
-        #         (m.Pa[n]*m.Ca['O2',n]/(m.Ca['O2',n]+m.Ca['H2',n]+eps+2))/\
-        #             (m.Pa[n]*2))
+        # return  m.dG[n] == m.dGstd + m.R*m.Tm[n]*\
+        #     log((m.Pc)*(m.Pa[n]-m.Pa_wt[n])**0.5 / (m.Pa_wt[n]+eps))
         return  m.dG[n] == m.dGstd
     m.Eq15 = Constraint(m.n, rule = _Eq15, doc = 'Eq Gibbs free energy') 
 
@@ -346,7 +368,7 @@ def build_memcap(sl = 20):
         """
         Difussion potential
         """
-        # return m.dif[n] == m.R*m.Ta/(4*m.F)*log(0.2) + m.R*m.Tc/(2*m.F)*log(2.5)
+        # return m.dif[n] == m.R*m.Ta[n]/(4*m.F)*log(0.2) + m.R*m.Tc[n]/(2*m.F)*log(2.5)
         return m.dif[n] == m.R*m.Ta[n]/(4*m.F)*log(eps + m.Ca['O2',n]/eps + m.C_O2_wc[n]) + m.R*m.Tc[n]/(2*m.F)*log(eps + m.Cc['H2',n]/eps + m.C_H2_wc[n])
     m.Eq18 = Constraint(m.n, rule = _Eq18, doc = 'Eq diffusion potential')
 
@@ -428,16 +450,46 @@ def build_memcap(sl = 20):
 
 def init_model(m):
     m.Cc['H2O', m.n.last()] = 19.91e3
-    m.Cc['H2', m.n.last()] = 2.141e3
+    m.Cc['H2', m.n.last()] = 2.12e3
+    for np in m.n:
+        m.ua[np].fix(m.ua_ref[np])
+        m.uc[np].fix(m.uc_ref[np])
     # m.j.setlb(0.7)
     return 
-
-
 
 def expand_model(m):
     for np in m.n:
         m.ua[np].unfix()
-        m.ua[np].unfix()
+        m.uc[np].unfix()
+
+    def ca_ua_fit(c):
+        x = c*1e-3
+        res = 13.389*exp(-0.0509*x)+ 1.852
+        return res/60
+
+    def cc_uc_fit(c):
+        x = c*1e-3
+        res = 0.218*x**2 - 8.381*x + 80.349
+        return res/60
+
+    # def _Eq26(m,n):
+    #     """
+    #     Velocity of anode side
+    #     """
+    #     if (m.n.first() == n):
+    #         return m.ua[n] == m.ua_0
+    #     return m.ua[n] == ca_ua_fit(m.Ca['H2O',n])
+    # m.Eq26 = Constraint(m.n, rule = _Eq26, doc = 'Velocity(Anode)')
+
+    # def _Eq27(m,n):
+    #     """
+    #     Velocity of cathode side
+    #     """
+    #     if (m.n.last() == n):
+    #         return m.uc[n] == m.uc_l 
+    #     return m.uc[n] == cc_uc_fit(m.Cc['H2O',n])
+    # m.Eq27 = Constraint(m.n, rule = _Eq27, doc = 'Velocity(Cathode)')
+
     def _Eq26(m,n):
         """
         Velocity of anode side
@@ -447,7 +499,7 @@ def expand_model(m):
         return m.ua[n]*m.R/(m.Pa[n]*m.p2SI)* (m.Ta[n]*m.Ca['O2',n] - m.Ta[n-1]*m.Ca['O2',n-1])/m.dz \
             == -(m.ua[n] - m.ua[n-1])*\
             (m.R*m.Ta[n]/(m.Pa[n]*m.p2SI)*m.Ca_tot[n] + m.mw['H2O']/m.rhos['H2O']*m.Ca['H2O',n])
-        m.Eq26 = Constraint(m.n, rule = _Eq26, doc = 'Velocity(Anode)')
+    m.Eq26 = Constraint(m.n, rule = _Eq26, doc = 'Velocity(Anode)')
 
     def _Eq27(m,n):
         """
@@ -459,6 +511,7 @@ def expand_model(m):
             == -(m.uc[n] - m.uc[n+1])*(m.R*m.Tc[n]/(m.Pa[n]*m.p2SI*m.zH)*m.Cc_tot[n] + m.mw['H2O']/m.rhos['H2O']\
             *m.Ca['H2O',n])
     m.Eq27 = Constraint(m.n, rule = _Eq27, doc = 'Velocity(Cathode)')
+
     return 
 
 m = build_memcap()
@@ -469,10 +522,10 @@ opt = SolverFactory('gams')
 io_options = dict() 
 
 io_options['solver'] = "baron"
-# res = opt.solve(m,
-#     tee=True,
-#     add_options = ['option reslim=60; option optcr=0.0;'],
-#     io_options=io_options)
+res = opt.solve(m,
+    tee=True,
+    add_options = ['option reslim=60; option optcr=0.0;'],
+    io_options=io_options)
 
 # expand_model(m)
 
@@ -488,7 +541,7 @@ res = opt.solve(m,
 io_options['solver'] = "ipopt"
 res = opt.solve(m,
     tee=True,
-    add_options = ['option reslim=150; option optcr=0.0;'],
+    add_options = ['option reslim=90; option optcr=0.0;'],
     io_options=io_options)
 
 m.obj.pprint()
@@ -585,7 +638,7 @@ l2 = []
 for v in range(0,21):
     l1.append(value(m.C_O2_wc[v]))
     l2.append(value(m.C_H2_wc[v]))
-df8['Ca_O2_wc'] = l1
+df8['Ca_O2_wc'] = l1 
 df8['Cc_H2_wc'] = l2
 
 col9 = ['Ua','Uc']
@@ -630,7 +683,9 @@ print('printing infeasible constraints')
 from pyomo.util.infeasible import log_infeasible_constraints
 log_infeasible_constraints(m)
 
-# m.Eq12.pprint()
+m.dG.pprint()
+
+print(value(m.Cc['H2',0]*m.uc[0]))
 # m.Neo.pprint()
 
 # for x in range(0,21):
