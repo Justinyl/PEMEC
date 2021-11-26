@@ -3,10 +3,9 @@ from pyomo.environ import *
 
 # ================= Initialization =========================
 
-
 # Sparser model, better initialization.
 
-def build_memcap(sl = 20):
+def build_memcap(sl = 30):
     """
     sl = Number of control volumes in the system
     """
@@ -143,14 +142,14 @@ def build_memcap(sl = 20):
    # Initializing parameters
 
     m.rhos['H2O'] = 1e3 #kg/m^3
-    m.mw['H2O'] = 18e3 #kg/mol
+    m.mw['H2O'] = 18e-3 #kg/mol
 
     # More Varibles 
     m.ua_0 = Var(initialize = 2.66/60, doc = 'velocity(m/s)')  
     m.uc_0 = Param(initialize = 0.144/60, doc = 'velocity(m/s)') 
     # m.uc_0 = Param(initialize = 0.1728/60, doc = 'velocity(m/s)') 
     # m.uc_l = Param(initialize = 0.120/60, doc = 'velocity(m/s)') 
-    m.uc_l = Param(initialize = 0.02364/60, doc = 'velocity(m/s)') 
+    m.uc_l = Param(initialize = 1.2096e-4, doc = 'velocity(m/s)') 
     # m.uc_0 = Var(domain = NonNegativeReals, initialize = 0.144/60, doc = 'velocity(m/s)') 
     # m.uc_l = Var(domain = NonNegativeReals, initialize = 0.02364/60, doc = 'velocity(m/s)') 
     m.EH = Var(m.n, domain = NonNegativeReals, doc = 'voltage(V) contributing to heat of formation change')
@@ -160,8 +159,7 @@ def build_memcap(sl = 20):
         # return value(m.ua_0) + n*(3.9/60-m.ua_0)/sl
     def uc_init(m, n):
         # return (value(m.uc_0)) 
-        # return (value(m.uc_0) + n*(m.uc_l/3 - m.uc_0)/sl)
-        return (value(m.uc_0) + n*(1.2096e-4-0.144/60)/sl)
+        return (value(m.uc_0) + n*(m.uc_l-0.144/60)/sl)
 
     def Ta_init(m,n):
         return 328
@@ -170,6 +168,7 @@ def build_memcap(sl = 20):
     def Tc_init(m,n):
         return 338
 
+    m.Tc_l = Var(initialize = 338, doc = 'Edge case for cathode') 
     m.Ta = Var(m.n, initialize = Ta_init, doc = 'Temperature of the membrane') 
     m.Tm = Var(m.n, initialize = Tm_init, doc = 'Temperature of anode') 
     m.Tc = Var(m.n, initialize = Tc_init, doc = 'Temperature of cathode') 
@@ -315,6 +314,7 @@ def build_memcap(sl = 20):
         Cell voltage
         """
         return m.V == m.E[n] + m.ohm[n] + m.act[n] + m.dif[n]
+        # return m.V == m.E[n] + m.ohm[n] + m.dif[n]
     m.Eq12 = Constraint(m.n, rule = _Eq12, doc = 'Eq Cell volage balance')
 
     def _Eq13(m,n):
@@ -367,8 +367,10 @@ def build_memcap(sl = 20):
         """
         Activation potential
         """
-        return m.act[n] == m.R*m.Ta[n]/(m.alpha_a*m.F)*arcsinh(m.j[n]/(2*m.j0_a)) +\
-            m.R*m.Tc[n]/(m.alpha_c*m.F)*arcsinh(m.j[n]/(2*m.j0_c))
+        # return m.act[n] == m.R*m.Ta[n]/(m.alpha_a*m.F)*arcsinh(m.j[n]/(2*m.j0_a)) +\
+        #     m.R*m.Tc[n]/(m.alpha_c*m.F)*arcsinh(m.j[n]/(2*m.j0_c))
+        return m.act[n] == m.R*m.Ta[n]/(m.alpha_a*m.F)*1.44 +\
+            m.R*m.Tc[n]/(m.alpha_c*m.F)*0.001
     m.Eq17 = Constraint(m.n, rule = _Eq17, doc = 'Eq activation potential')
 
     def _Eq18(m,n):
@@ -427,7 +429,8 @@ def build_memcap(sl = 20):
 def init_model(m):
     m.Cc['H2O', m.n.last()] = 19.91e3
     m.Cc['H2', m.n.last()] = 2.12e3
-
+    m.hhv = Param(initialize = 285.8e3, doc = 'HHV for the combustion of hydrogen(J/mol)')
+    
     m.ua_0.fix(value(m.ua_0))
 
     for np in m.n:
@@ -436,113 +439,9 @@ def init_model(m):
         m.Ta[np].fix(328)
         m.Tc[np].fix(338)
         m.Tm[np].fix(348)
+    m.Tc_l.fix(338)
 
     # m.j.setlb(0.7)
-    return 
-
-def use_sparse_model(m):
-
-    # m.del_component(m.Eq1)
-    # m.del_component(m.Eq2)
-    # m.del_component(m.Eq3)
-    # m.del_component(m.Eq4)
-    # m.del_component(m.Eq5)
-
-    # Create sparser model:
-
-    def dUaCadz_init(m, i, n):
-        if n == m.n.first():
-            return (m.ua[n]*m.Ca[i,n] - m.ua_0*m.Ca0[i])/m.dz
-        return (m.ua[n]*m.Ca[i,n] - m.ua[n-1]*m.Ca[i,n-1])/m.dz
-    
-    def dUcCcdz_init(m, ci, n):
-        if n == m.n.last():
-            return m.uc[n]*m.Cc[ci, n]/m.dz
-        return (m.uc[n]*m.Cc[ci,n]-m.uc[n+1]*m.Cc[ci, n+1])/m.dz
-
-    m.dUaCadz = Var(m.i, m.n, initialize = dUaCadz_init, doc = 'concentration change over control volume')
-    # m.dUcCcdz = Var(m.ci, m.n, initialize = dUcCcdz_init, doc = 'concentration change over control volume')
-
-    def _Eqgrad_AH2O(m, n):
-        """
-        water concentration change over control volume
-        """
-        if ( n == m.n.first()):
-            return m.dUaCadz['H2O', n] ==  (m.ua[n]*m.Ca['H2O',n] - m.ua_0*m.Ca0['H2O'])/m.dz
-        return m.dUaCadz['H2O', n] ==  (m.ua[n]*m.Ca['H2O',n] - m.ua[n-1]*m.Ca['H2O',n-1])/m.dz
-    m.Eqgrad_AH2O = Constraint(m.n, rule=_Eqgrad_AH2O, doc= 'dA2O, CV')
-
-    def _Eq1s(m, n):
-        """
-        MB: H2O anode
-        """
-        return m.dUaCadz['H2O', n] + 1/m.h_ch*(m.Nd[n]+m.Neo[n]+m.Nrxn['H2O', n]) == 0
-    m.Eq1 = Constraint(m.n, rule=_Eq1s, doc= 'MB H2O anode')
-
-    # def _Eqgrad_CH2O(m, n):
-    #     """
-    #     water concentration change over control volume
-    #     """
-    #     if ( n == m.n.last()):
-    #         return m.dUcCcdz['H2O', n] == ( m.uc[n]*m.Cc['H2O',n]-m.uc_l*m.Cc['H2O', n])/m.dz
-    #     return m.dUcCcdz['H2O', n] == ( m.uc[n]*m.Cc['H2O',n]-m.uc[n+1]*m.Cc['H2O', n+1])/m.dz
-    # m.Eqgrad_CH2O = Constraint(m.n, rule=_Eqgrad_CH2O, doc= 'dCH2O, CV')
-
-    # def _Eq2s(m, n): 
-    #     """
-    #     MB: H2O cathode
-    #     """
-    #     return m.dUcCcdz['H2O', n] - 1/m.h_ch*(m.Nd[n] + m.Neo[n] + m.Nrxn['H2O', n]) == 0 
-    # m.Eq2 = Constraint(m.n, rule=_Eq2s, doc= 'MB H2O cathode')
-
-    def _Eqgrad_AO2(m, n):
-        """
-        oxygen concentration change over control volume
-        """
-        if ( n == m.n.first()):
-            return m.dUaCadz['O2', n] ==  (m.ua[n]*m.Ca['O2',n] - m.ua_0*m.Ca0['O2'])/m.dz
-        return m.dUaCadz['O2', n] ==  (m.ua[n]*m.Ca['O2',n] - m.ua[n-1]*m.Ca['O2',n-1])/m.dz
-    m.Eqgrad_AO2 = Constraint(m.n, rule=_Eqgrad_AO2, doc= 'dAO2, CV')
-
-    def _Eq3s(m, n):
-        """
-        MB: O2 Anode
-        """
-        return m.dUaCadz['O2', n] - 1/m.h_ch*(m.Nrxn['O2', n]) == 0
-    m.Eq3 = Constraint(m.n, rule=_Eq3s, doc= 'MB O2 anode')
-
-    def _Eqgrad_AH2(m, n):
-        """
-        hydrogen concentration change over control volume
-        """
-        if ( n == m.n.first()):
-            return m.dUaCadz['H2', n] ==  (m.ua[n]*m.Ca['H2',n] - m.ua_0*m.Ca0['H2'])/m.dz
-        return m.dUaCadz['H2', n] ==  (m.ua[n]*m.Ca['H2',n] - m.ua[n-1]*m.Ca['H2',n-1])/m.dz
-    m.Eqgrad_AH2 = Constraint(m.n, rule=_Eqgrad_AH2, doc= 'dAH2, CV')
-
-    def _Eq4s(m, n):
-        """
-        MB: H2 Anode
-        """
-        return m.dUaCadz['H2', n] - 1/m.h_ch*(m.gamma*m.Nper[n]) == 0 
-    m.Eq4 = Constraint(m.n, rule=_Eq4s, doc= 'MB H2 anode')
-
-    # def _Eqgrad_CH2(m, n):
-    #     """
-    #     hydrogen concentration change over control volume
-    #     """
-    #     if ( n == m.n.last()):
-    #         return m.dUcCcdz['H2', n] == ( m.uc[n]*m.Cc['H2',n]-m.uc_l*m.Cc['H2', n])/m.dz
-    #     return m.dUcCcdz['H2', n] == ( m.uc[n]*m.Cc['H2',n]-m.uc[n+1]*m.Cc['H2', n+1])/m.dz
-    # m.Eqgrad_CH2 = Constraint(m.n, rule=_Eqgrad_CH2, doc= 'dCH2, CV')
-
-    # def _Eq5s(m, n):
-    #     """
-    #     MB: H2 Cathode
-    #     """
-    #     return m.dUcCcdz['H2', n] - 1/m.h_ch*(m.Nd[n] + m.Neo[n] + m.Nrxn['H2', n]) == 0 
-    # m.Eq5 = Constraint(m.n, rule = _Eq5s, doc = 'MB H2 cathode')
-
     return 
 
 def set_current_req(m, javg=1):
@@ -558,6 +457,7 @@ def add_energy_balance(m):
         m.Ta[np].unfix()
         m.Tc[np].unfix()
         m.Tm[np].unfix()
+        m.Tc_l.unfix()
     eps = m.eps
 
     def _Eq23(m,n):
@@ -571,15 +471,20 @@ def add_energy_balance(m):
             m.cp_a[n]*m.h_ch+eps)
     m.Eq23 = Constraint(m.n, rule = _Eq23, doc = 'Energy Balance(Anode)')
 
+    def _Eq_Tcl(m):
+        return m.Tc_l == m.Ta[value(m.sl)] + m.Tc[0]-m.Ta[0]
+    m.Eq_Tcl = Constraint(rule = _Eq_Tcl)
+
+
     def _Eq24(m,n):
         """
         EB: Cathode
         """
         if (n == m.n.last()):
-            # return m.uc[n]*(m.Tc[n] - m.Tc[n] )/m.dz == m.fbp/(m.Cc_tot[n]*m.cp_c[n]*m.h_ch+eps)*(m.Ta[n]-m.Tc[n])+\
-            #     (m.cp['H2O']*(m.Nd[n] + m.Neo[n]) + m.cp['H2']*(m.Nrxn['H2',n]+(1-m.gamma)*m.Nper[n]) +m.fc)*(m.Tm[n]-m.Tc[n])/(m.Cc_tot[n]*\
-            #     m.cp_c[n]*m.h_ch+eps)
-            return m.Tc[n] == 80 + 273.15
+            return m.uc[n]*(m.Tc[n]-m.Tc_l)/m.dz == m.fbp/(m.Cc_tot[n]*m.cp_c[n]*m.h_ch+eps)*(m.Ta[n]-m.Tc[n])+\
+                (m.cp['H2O']*(m.Nd[n] + m.Neo[n]) + m.cp['H2']*(m.Nrxn['H2',n]+(1-m.gamma)*m.Nper[n]) +m.fc)*(m.Tm[n]-m.Tc[n])/(m.Cc_tot[n]*\
+                m.cp_c[n]*m.h_ch+eps)
+            # return m.Tc[n] == 67 + 273.15
         return m.uc[n]*(m.Tc[n]-m.Tc[n+1])/m.dz == m.fbp/(m.Cc_tot[n]*m.cp_c[n]*m.h_ch+eps)*(m.Ta[n]-m.Tc[n])+\
             (m.cp['H2O']*(m.Nd[n] + m.Neo[n]) + m.cp['H2']*(m.Nrxn['H2',n]+(1-m.gamma)*m.Nper[n]) +m.fc)*(m.Tm[n]-m.Tc[n])/(m.Cc_tot[n]*\
             m.cp_c[n]*m.h_ch+eps)
@@ -594,32 +499,34 @@ def add_energy_balance(m):
             (m.cp['H2']*m.Nper[n]+m.fc)*(m.Tc[n]-m.Tm[n])/(m.h_m*m.rhom*m.cp_m + m.hbp*m.rhobp*m.cp_bp) == 0
     m.Eq25 = Constraint(m.n, rule = _Eq25, doc = 'Energy Balance(MEA-bipolar)')
 
-    def _Tmp_c1(m,n):
-        return m.Ta[n] <= 5 + m.Tc[n]
-    m.EqTc1 = Constraint(m.n, rule = _Tmp_c1)
-    def _Tmp_c2(m,n):
-        return m.Tc[n] <= 5 + m.Tm[n]
-    m.EqTc2 = Constraint(m.n, rule = _Tmp_c2)
-
     return 
 
 def expand_model(m):
     for np in m.n:
         m.ua[np].unfix()
         m.uc[np].unfix()
-
-    # m.ua_0.unfix()    
-
+ 
     def _Eq_ua(m,n):
-        return m.ua_0 + n*0.0367617/m.sl == m.ua[n]
-    
+        return m.ua_0 + n*m.j_avg*0.0367617/m.sl == m.ua[n]
     m.Eq_ua = Constraint(m.n, rule = _Eq_ua)
 
     def _Eq_uc(m,n):
-        return (value(m.uc_0) + n*(1.2096e-4-0.144/60)/m.sl) == m.uc[n]
+        return (value(m.uc_l) + (m.sl-n)*m.j_avg*2.27904*1e-3/m.sl) == m.uc[n]
     m.Eq_uc = Constraint(m.n, rule = _Eq_uc)
 
-    # m.obj = Objective(expr = m.Cc['H2',0]*m.uc[0], sense = maximize)
+    return 
+
+def set_velocity(m):
+    m.del_component(m.Eq_ua)
+    m.del_component(m.Eq_uc)
+
+    def _Eq_ua(m,n):
+        return 1 == m.Ca['H2O',n]*m.mw['H2O']/m.rhos['H2O'] + (m.Ca['H2',n]+m.Ca['O2',n])*m.R*m.Ta[n]/m.Pa[n]
+    m.Eq_ua = Constraint(m.n, rule = _Eq_ua)
+
+    def _Eq_uc(m,n):
+        return (value(m.uc_l) + (m.sl-n)*m.j_avg*2.27904*1e-3/m.sl) == m.uc[n]
+    m.Eq_uc = Constraint(m.n, rule = _Eq_uc)
 
     return 
 
@@ -644,6 +551,20 @@ res = opt.solve(m,
     # tmpdir='/home/zyuliu/PEMEC/Mv1',
     io_options=io_options)
 
+expand_model(m)
+
+io_options['solver'] = "baron"
+res = opt.solve(m,
+    tee=True,
+    add_options = ['option reslim=60; option optcr=0.0;'],
+    io_options=io_options)
+
+io_options['solver'] = "ipopt"
+res = opt.solve(m,
+    tee=True,
+    add_options = ['option reslim=90; option optcr=0.0;'],
+    io_options=io_options)
+
 add_energy_balance(m)
 
 io_options['solver'] = "baron"
@@ -652,12 +573,32 @@ res = opt.solve(m,
     add_options = ['option reslim=60; option optcr=0.0;'],
     io_options=io_options)
 
+io_options['solver'] = "ipopt"
+res = opt.solve(m,
+    tee=True,
+    add_options = ['option reslim=90; option optcr=0.0;'],
+    io_options=io_options)
+
+set_velocity(m)
+
+io_options['solver'] = "baron"
+res = opt.solve(m,
+    tee=True,
+    add_options = ['option reslim=60; option optcr=0.0;'],
+    io_options=io_options)
+
+io_options['solver'] = "ipopt"
+res = opt.solve(m,
+    tee=True,
+    add_options = ['option reslim=90; option optcr=0.0;'],
+    io_options=io_options)
+
 
 # Paramter Sweep
-# j_list = [0.8, 1.2, 1]
-# j_list = [0.8]
+# j_list = [0.2, 0.6, 0.8, 1, 1.2, 1.4]
+# j_list = [1]
+# rep_list = []
 # for javg in j_list:
-
 #     set_current_req(m, javg)
 
 #     io_options['solver'] = "ipopt"
@@ -667,12 +608,11 @@ res = opt.solve(m,
 #         add_options = ['option reslim=90; option optcr=0.0;'],
 #         # tmpdir='/home/zyuliu/PEMEC/Mv1',
 #         io_options=io_options)
-
-add_energy_balance(m)
+#     rep_list.append(value(-100*m.hhv*m.Cc['H2',0]*m.uc[0]/(1e4*m.j_avg*m.V)))
 
 # set_current_req(m, 1.2)
 
-io_options['solver'] = "ipopt"
+io_options['solver'] = "antigone"
 res = opt.solve(m,
     tee=True,
     keepfiles=True,
@@ -821,8 +761,10 @@ with pd.ExcelWriter('Model_V1_9_output.xlsx') as writer:
     df9.to_excel(writer, sheet_name='Velocity')
     df10.to_excel(writer, sheet_name='Temperature')
 
-print('H2 production')
-print(value(1e3*m.Cc['H2',0]*m.uc[0]))
+# print('H2 production')
+# for i in rep_list:
+#     print(i)
+# print(value(1e3*m.Cc['H2',0]*m.uc[0]))
 
 print('printing infeasible constraints')
 
