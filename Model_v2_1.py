@@ -181,8 +181,9 @@ def build_model(sl = 30):
     m.j_avg = Var(initialize = 1, doc = 'Average current density')
     # m.j_avg.setlb(0.4)
     # m.j_avg.setub(1.3)
-    m.Pc = Param(initialize = Pc_init, doc = 'Cathode Pressure (bar) initialization')
-    m.hhv = Param(initialize = 285.8e3, doc = 'HHV for the combustion of hydrogen(J/mol)')
+    m.Pc = Var(initialize = Pc_init, doc = 'Cathode Pressure (bar) initialization')
+    # m.hhv = Param(initialize = 285.8e3, doc = 'HHV for the combustion of hydrogen(J/mol)')
+    m.hhv = Param(initialize = 249.2e3, doc = 'LHV for the combustion of hydrogen(J/mol)')
 
     # ================== Equations ===================
 
@@ -426,6 +427,7 @@ def init_model(m):
     m.Cc['H2', m.n.last()] = 2.12e3
     m.j_avg.fix(1)
     m.ua_0.fix(value(m.ua_0))
+    m.Pc.fix(value(m.Pc))
 
     for np in m.n:
         m.ua[np].fix(m.ua_ref[np])
@@ -438,111 +440,6 @@ def init_model(m):
     # m.j.setlb(0.7)
     return 
 
-def use_sparse_model(m):
-
-    m.del_component(m.Eq1)
-    m.del_component(m.Eq2)
-    m.del_component(m.Eq3)
-    m.del_component(m.Eq4)
-    m.del_component(m.Eq5)
-
-    # Create sparser model:
-
-    def dUaCadz_init(m, i, n):
-        if n == m.n.first():
-            return (m.ua[n]*m.Ca[i,n] - m.ua_0*m.Ca0[i])/m.dz
-        return (m.ua[n]*m.Ca[i,n] - m.ua[n-1]*m.Ca[i,n-1])/m.dz
-    
-    def dUcCcdz_init(m, ci, n):
-        if n == m.n.last():
-            return m.uc[n]*m.Cc[ci, n]/m.dz
-        return (m.uc[n]*m.Cc[ci,n]-m.uc[n+1]*m.Cc[ci, n+1])/m.dz
-
-    m.dUaCadz = Var(m.i, m.n, initialize = dUaCadz_init, doc = 'concentration change over control volume')
-    m.dUcCcdz = Var(m.ci, m.n, initialize = dUcCcdz_init, doc = 'concentration change over control volume')
-
-    def _Eqgrad_AH2O(m, n):
-        """
-        water concentration change over control volume
-        """
-        if ( n == m.n.first()):
-            return m.dUaCadz['H2O', n] ==  (m.ua[n]*m.Ca['H2O',n] - m.ua_0*m.Ca0['H2O'])/m.dz
-        return m.dUaCadz['H2O', n] ==  (m.ua[n]*m.Ca['H2O',n] - m.ua[n-1]*m.Ca['H2O',n-1])/m.dz
-    m.Eqgrad_AH2O = Constraint(m.n, rule=_Eqgrad_AH2O, doc= 'dA2O, CV')
-
-    def _Eq1s(m, n):
-        """
-        MB: H2O anode
-        """
-        return m.dUaCadz['H2O', n] + 1/m.h_ch*(m.Nd[n]+m.Neo[n]+m.Nrxn['H2O', n]) == 0
-    m.Eq1 = Constraint(m.n, rule=_Eq1s, doc= 'MB H2O anode')
-
-    def _Eqgrad_CH2O(m, n):
-        """
-        water concentration change over control volume
-        """
-        if ( n == m.n.last()):
-            return m.dUcCcdz['H2O', n] == ( m.uc[n]*m.Cc['H2O',n]-m.uc_l*m.Cc['H2O', n])/m.dz
-        return m.dUcCcdz['H2O', n] == ( m.uc[n]*m.Cc['H2O',n]-m.uc[n+1]*m.Cc['H2O', n+1])/m.dz
-    m.Eqgrad_CH2O = Constraint(m.n, rule=_Eqgrad_CH2O, doc= 'dCH2O, CV')
-
-    def _Eq2s(m, n): 
-        """
-        MB: H2O cathode
-        """
-        return m.dUcCcdz['H2O', n] - 1/m.h_ch*(m.Nd[n] + m.Neo[n] + m.Nrxn['H2O', n]) == 0 
-    m.Eq2 = Constraint(m.n, rule=_Eq2s, doc= 'MB H2O cathode')
-
-    def _Eqgrad_AO2(m, n):
-        """
-        oxygen concentration change over control volume
-        """
-        if ( n == m.n.first()):
-            return m.dUaCadz['O2', n] ==  (m.ua[n]*m.Ca['O2',n] - m.ua_0*m.Ca0['O2'])/m.dz
-        return m.dUaCadz['O2', n] ==  (m.ua[n]*m.Ca['O2',n] - m.ua[n-1]*m.Ca['O2',n-1])/m.dz
-    m.Eqgrad_AO2 = Constraint(m.n, rule=_Eqgrad_AO2, doc= 'dAO2, CV')
-
-    def _Eq3s(m, n):
-        """
-        MB: O2 Anode
-        """
-        return m.dUaCadz['O2', n] - 1/m.h_ch*(m.Nrxn['O2', n]) == 0
-    m.Eq3 = Constraint(m.n, rule=_Eq3s, doc= 'MB O2 anode')
-
-    def _Eqgrad_AH2(m, n):
-        """
-        hydrogen concentration change over control volume
-        """
-        if ( n == m.n.first()):
-            return m.dUaCadz['H2', n] ==  (m.ua[n]*m.Ca['H2',n] - m.ua_0*m.Ca0['H2'])/m.dz
-        return m.dUaCadz['H2', n] ==  (m.ua[n]*m.Ca['H2',n] - m.ua[n-1]*m.Ca['H2',n-1])/m.dz
-    m.Eqgrad_AH2 = Constraint(m.n, rule=_Eqgrad_AH2, doc= 'dAH2, CV')
-
-    def _Eq4s(m, n):
-        """
-        MB: H2 Anode
-        """
-        return m.dUaCadz['H2', n] - 1/m.h_ch*(m.gamma*m.Nper[n]) == 0 
-    m.Eq4 = Constraint(m.n, rule=_Eq4s, doc= 'MB H2 anode')
-
-    def _Eqgrad_CH2(m, n):
-        """
-        hydrogen concentration change over control volume
-        """
-        if ( n == m.n.last()):
-            return m.dUcCcdz['H2', n] == ( m.uc[n]*m.Cc['H2',n]-m.uc_l*m.Cc['H2', n])/m.dz
-        return m.dUcCcdz['H2', n] == ( m.uc[n]*m.Cc['H2',n]-m.uc[n+1]*m.Cc['H2', n+1])/m.dz
-    m.Eqgrad_CH2 = Constraint(m.n, rule=_Eqgrad_CH2, doc= 'dCH2, CV')
-
-    def _Eq5s(m, n):
-        """
-        MB: H2 Cathode
-        """
-        return m.dUcCcdz['H2', n] - 1/m.h_ch*(m.Nd[n] + m.Neo[n] + m.Nrxn['H2', n]) == 0 
-    m.Eq5 = Constraint(m.n, rule = _Eq5s, doc = 'MB H2 cathode')
-
-    return 
-
 def set_current_req(m, javg=1):
     m.del_component(m.Eq_jreq)
     m.j_avg.unfix()
@@ -551,6 +448,16 @@ def set_current_req(m, javg=1):
         return sum(m.j[n] for n in m.n) == m.j_avg*(m.sl+1)
     m.Eq_jreq = Constraint(rule = _Eq_jreq, doc = 'Controlling average current density')
     return 
+
+def set_inlet_req(m, ua_0=2.66/60):
+    m.ua_0.unfix()
+    m.ua_0.fix(ua_0)
+    return
+
+def set_pressure_req(m, Pc_0=100):
+    m.Pc.unfix()
+    m.Pc.fix(Pc_0)
+    return
 
 def add_energy_balance(m):
     for np in m.n:
@@ -616,59 +523,51 @@ def expand_model(m):
     return 
 
 
-def opt_model(m, objf=0, relax=0, weight = 0.5):
+def add_sweep(m, objf=0, relax=0, weight = 0.5):
     """
-    objf: objective function:
-        0 for technical objective
-        1 for cost objective
-    relax: parameter to relax
-        0 for average current density
-        1 for inlet flow rate
-    weight: weight for efficiency and (1-weight) for hydrogen production
-        0 - 1
-    sub_obj:
-        debug purpose for techical obj 
+        prepare for parametric sweep for different obj
     """
-    m.obj_value = Var(doc = 'intermediate value for objective value')
+    # m.del_component(m.obj)
 
-    if relax == 1:
-        m.ua_0.unfix()
-    elif relax == 0:
-        m.j_avg.unfix()
-    else:
-        m.ua_0.unfix()
-        m.j_avg.unfix()
+    # m.ecost = Param(initialize = 6.66e-2, doc = '$/kWh')
+    m.ecost = Param(initialize = 13.89e-2, doc = '$/kWh') # pitt avg
+    m.Hprice = Param(initialize = 3, doc = '$/kg' )
 
-    m.del_component(m.obj)
+    m.Hprod = Var(doc = 'Hydrogen Production(mol/s)')
+    m.P_op = Var(doc = 'power used in operating condition')
+    m.eta_sys = Var(doc = 'system efficiency')
+    m.cost = Var(doc = 'cost at operating condition')
+    m.Hprod_price = Var(doc = 'Hydrogen produce in dollar value')
 
-    if objf:
-        # cost obj
-        m.obj = Objective(expr = m.obj_value)
-    else:
-        # tech obj
-        m.effy = Var(doc = 'energy used')
-        m.Hprod = Var(doc = 'Hydrogen Production(mol/s)')
-        m.weight = Param(initialize = weight,  doc = 'weight for system efficiency', mutable = True)
+    def _Eq_Hprod(m):
+        """ mol/s """
+        return m.Hprod == m.b*m.h_ch*m.Cc['H2',0]*m.uc[0]
+        # return m.Hprod == m.hhv*m.Cc['H2',0]*m.uc[0]
+    m.Eq_Hprod = Constraint(rule =  _Eq_Hprod)
 
-        def _Eq_obj_effy(m):
-            # return  m.effy == 100*m.b*m.h_ch*m.hhv*m.Cc['H2',0]*m.uc[0]/(1e4*m.j_avg*m.V*m.L*m.b)
-            return m.effy == -1e4*m.j_avg*m.V*m.L*m.b
-        m.Eq_objeffy = Constraint(rule = _Eq_obj_effy)
+    def _Eq_P_op(m):
+        """ W """
+        return m.P_op == 1e4*m.j_avg*m.V*m.L*m.b
+        # return m.P_op == 1e4*m.j_avg*m.V
+    m.Eq_P_op = Constraint(rule = _Eq_P_op)
 
-        def _Eq_obj_Hprod(m):
-            return m.Hprod == m.b*m.h_ch*m.hhv*m.Cc['H2',0]*m.uc[0]
-        m.Eq_obj_Hprod = Constraint(rule = _Eq_obj_Hprod)
+    def _Eq_eta_sys(m):
+        """ % """
+        return  m.eta_sys == m.hhv*m.Hprod/(m.P_op+m.eps)*100
+        #  return 1e-3*m.eta_sys == (1-m.hhv*m.Hprod/(m.P_op+m.eps))*(m.P_op+m.eps)/m.hhv*18e-3*m.Hprice*3600
+    m.Eq_eta_sys = Constraint(rule = _Eq_eta_sys)  
 
-        def _Eq_obj(m):
-            return m.effy*m.weight + (1-m.weight)*m.Hprod == m.obj_value
-        m.Eq_obj = Constraint(rule =  _Eq_obj)
+    def _Eq_cost(m):
+        """ 1e-3 $/h """
+        return m.cost == m.ecost*m.P_op
+    m.Eq_cost = Constraint(rule = _Eq_cost)
 
-        m.obj = Objective(expr = -m.obj_value)
+    def _Eq_Hprod_price(m):
+        """ 1e-3$/h """
+        return 1e-3*m.Hprod_price == m.Hprod*18e-3*3600*m.Hprice
+    m.Eq_Hprod_price = Constraint(rule = _Eq_Hprod_price)
+
     return 
-
-def set_weight(m, w):
-    m.weight = w
-
 
 m = build_model()
 
@@ -707,29 +606,86 @@ res = opt.solve(m,
     add_options = ['option reslim=90; option optcr=0.0;'],
     io_options=io_options)
 
-opt_model(m, relax = 0, weight = 0.53)
-# use_sparse_model(m)
+add_sweep(m)
 
-io_options['solver'] = "baron"
-res = opt.solve(m,
-    tee=True,
-    add_options = ['option reslim=60; option optcr=0.0;'],
-    io_options=io_options)
+# j_list = [0.7, 0.8, 0.9, 1, 1.2, 1.3, 1.4]
+j_list = [1]
+rep_list_javg = []
+for javg in j_list:
+    set_current_req(m, javg)
+    io_options['solver'] = "baron"
+    res = opt.solve(m,
+        tee=True,
+        add_options = ['option reslim=40; option optcr=0.0;'],
+        io_options=io_options)
 
-# m.ua_0.unfix()
-
-io_options['solver'] = "conopt"
-res = opt.solve(m,
+    io_options['solver'] = "ipopt"
+    res = opt.solve(m,
     tee=True,
     add_options = ['option reslim=90; option optcr=0.0;'],
     io_options=io_options)
+
+    rep_list_javg.append([value(m.eta_sys), value(m.cost), value(m.Hprod_price)])
+
+set_current_req(m)    
+
+# tmp = 2.66/60
+# tmp_list = [0.2, 0.0.6, 1, 2, 10]
+# ua_0_list = [tmp*i for i in tmp_list]
+# rep_list_ua0 = []
+# for ua0 in ua_0_list:
+#     set_inlet_req(m, ua0)
+#     io_options['solver'] = "baron"
+#     res = opt.solve(m,
+#         tee=True,
+#         add_options = ['option reslim=40; option optcr=0.0;'],
+#         io_options=io_options)
+
+#     io_options['solver'] = "ipopt"
+#     res = opt.solve(m,
+#     tee=True,
+#     add_options = ['option reslim=90; option optcr=0.0;'],
+#     io_options=io_options)
+
+#     rep_list_ua0.append([value(m.eta_sys), value(m.cost), m.Hprod_price])
+
+# set_inlet_req(m)
+
+# P_list = [3, 30, 100, 200]
+# rep_list_Pc = []
+# for pc0 in P_list:
+#     set_pressure_req(m, pc0)
+#     io_options['solver'] = "baron"
+#     res = opt.solve(m,
+#         tee=True,
+#         add_options = ['option reslim=40; option optcr=0.0;'],
+#         io_options=io_options)
+
+#     io_options['solver'] = "ipopt"
+#     res = opt.solve(m,
+#     tee=True,
+#     add_options = ['option reslim=90; option optcr=0.0;'],
+#     io_options=io_options)
+
+#     rep_list_Pc.append([value(m.eta_sys), value(m.cost), value(m.Hprod_price)])
+
+set_pressure_req(m)   
+
+
+# m.ua_0.unfix()
+
+# io_options['solver'] = "conopt"
+# res = opt.solve(m,
+#     tee=True,
+#     add_options = ['option reslim=90; option optcr=0.0;'],
+#     io_options=io_options)
 
 io_options['solver'] = "ipopt"
 res = opt.solve(m,
     tee=True,
     keepfiles=True,
     # symbolic_solver_labels=True,
-    add_options = ['GAMS_MODEL.optfile = 1; option reslim=150; option optcr=0.0;'],
+    add_options = ['GAMS_MODEL.optfile = 1; option reslim=120; option optcr=0.0;'],
     tmpdir='/home/zyuliu/PEMEC/Mv1',
     io_options=io_options)
 
@@ -882,8 +838,15 @@ print('printing infeasible constraints')
 
 from pyomo.util.infeasible import log_infeasible_constraints
 log_infeasible_constraints(m)
-m.obj.pprint()
-print(value(m.obj))
-print(value(-m.effy))
-print(value(m.Hprod))
-print(value(100*m.Hprod/-m.effy))
+
+print('current')
+for i in rep_list_javg:
+    print(i)
+
+# print('inlet')
+# for i in rep_list_ua0:
+#     print(i)
+
+print('pressure')
+for i in rep_list_Pc:
+    print(i)
